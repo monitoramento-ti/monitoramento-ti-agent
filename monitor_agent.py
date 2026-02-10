@@ -6,7 +6,7 @@ import socket
 import platform
 import requests
 import psutil
-from datetime import datetime
+from datetime import datetime, timezone  # Importação correta para compatibilidade
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
@@ -57,19 +57,28 @@ def get_ip():
         return "0.0.0.0"
 
 def coletar_dados():
-    # Usando timezone-aware para evitar o erro de deprecation
-    from datetime import timezone
+    # Coleta de métricas
+    cpu = psutil.cpu_percent(interval=1)
+    ram = psutil.virtual_memory().percent
+    
+    try:
+        # Tenta pegar o disco principal (C: no Windows)
+        uso_disco = psutil.disk_usage('C:\\' if platform.system() == 'Windows' else '/')
+        disco_livre_pct = (uso_disco.free / uso_disco.total) * 100
+    except:
+        disco_livre_pct = 0
+
     return {
         "agent_id": AGENT_ID,
         "cliente": CLIENTE,
         "agent_name": AGENT_NAME,
         "hostname": platform.node(),
         "ip_local": get_ip(),
-        "cpu_percent": psutil.cpu_percent(interval=1),
-        "ram_percent": psutil.virtual_memory().percent,
-        "disk_free_percent": psutil.disk_usage("/").free / psutil.disk_usage("/").total * 100,
+        "cpu_percent": cpu,
+        "ram_percent": ram,
+        "disk_free_percent": disco_livre_pct,
         "email_alerta": EMAIL,
-        "timestamp": datetime.now(datetime.UTC).isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat() # Mudança aqui para evitar erro de versão
     }
 
 # =========================
@@ -87,7 +96,8 @@ print("===================================")
 while True:
     try:
         payload = coletar_dados()
-        r = requests.post(API_URL, json=payload, timeout=10)
+        # Envia os dados para a API
+        r = requests.post(API_URL, json=payload, timeout=15)
 
         if r.status_code == 200:
             print(f"[OK] Heartbeat enviado - {datetime.now().strftime('%H:%M:%S')}")
@@ -98,5 +108,3 @@ while True:
         print(f"[FALHA] {e}")
 
     time.sleep(INTERVAL)
-
-
