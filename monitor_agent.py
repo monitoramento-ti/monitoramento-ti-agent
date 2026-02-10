@@ -57,6 +57,8 @@ def get_ip():
         return "0.0.0.0"
 
 def coletar_dados():
+    # Usando timezone-aware para evitar o erro de deprecation
+    from datetime import timezone
     return {
         "agent_id": AGENT_ID,
         "cliente": CLIENTE,
@@ -67,7 +69,7 @@ def coletar_dados():
         "ram_percent": psutil.virtual_memory().percent,
         "disk_free_percent": psutil.disk_usage("/").free / psutil.disk_usage("/").total * 100,
         "email_alerta": EMAIL,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat() # Força o envio em UTC
     }
 
 # =========================
@@ -96,3 +98,4 @@ while True:
         print(f"[FALHA] {e}")
 
     time.sleep(INTERVAL)
+
