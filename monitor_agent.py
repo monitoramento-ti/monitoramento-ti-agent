@@ -69,7 +69,7 @@ def coletar_dados():
         "ram_percent": psutil.virtual_memory().percent,
         "disk_free_percent": psutil.disk_usage("/").free / psutil.disk_usage("/").total * 100,
         "email_alerta": EMAIL,
-        "timestamp": datetime.now(timezone.utc).isoformat() # Força o envio em UTC
+        "timestamp": datetime.now(datetime.UTC).isoformat()
     }
 
 # =========================
@@ -98,4 +98,5 @@ while True:
         print(f"[FALHA] {e}")
 
     time.sleep(INTERVAL)
+
 
