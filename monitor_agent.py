@@ -1,44 +1,52 @@
-import requests
+import os
 import json
 import time
-import os
+import uuid
 import socket
+import platform
+import requests
 import psutil
-import subprocess
-from datetime import datetime, UTC
+from datetime import datetime
 
-# ===============================
-# PATHS
-# ===============================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
-CACHE_DIR = os.path.join(BASE_DIR, "cache")
-CACHE_FILE = os.path.join(CACHE_DIR, "offline.json")
+AGENT_ID_PATH = os.path.join(BASE_DIR, "agent_id.txt")
 
-os.makedirs(CACHE_DIR, exist_ok=True)
+# =========================
+# Carrega config
+# =========================
+if not os.path.exists(CONFIG_PATH):
+    print("[ERRO] config.json não encontrado")
+    exit(1)
 
-# ===============================
-# LOAD CONFIG
-# ===============================
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
     config = json.load(f)
 
-API_URL = config["api_url"]
+API_URL = config.get("api_url")
+CLIENTE = config.get("cliente")
+AGENT_NAME = config.get("agent_name", "SERVIDOR")
 INTERVAL = int(config.get("interval_seconds", 60))
+EMAIL = config.get("email_alerta")
 
-CLIENTE = config.get("cliente", "SEM_CLIENTE")
+if not API_URL or not CLIENTE:
+    print("[ERRO] config.json incompleto")
+    exit(1)
 
-# 👉 IDENTIDADE ÚNICA DO SERVIDOR
-HOSTNAME = socket.gethostname().upper()
-AGENT_NAME = HOSTNAME
+# =========================
+# Gera / carrega ID único
+# =========================
+if os.path.exists(AGENT_ID_PATH):
+    with open(AGENT_ID_PATH, "r") as f:
+        AGENT_ID = f.read().strip()
+else:
+    AGENT_ID = str(uuid.uuid4())
+    with open(AGENT_ID_PATH, "w") as f:
+        f.write(AGENT_ID)
 
-# ===============================
-# UTIL
-# ===============================
-def log(msg):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
-
-def get_ip_local():
+# =========================
+# Funções
+# =========================
+def get_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -48,110 +56,43 @@ def get_ip_local():
     except:
         return "0.0.0.0"
 
-# ===============================
-# COLETA
-# ===============================
-def coletar_status():
-    cpu = psutil.cpu_percent(interval=1)
-    ram = psutil.virtual_memory().percent
-
-    try:
-        disco = psutil.disk_usage("C:")
-        disk_free = round(100 - disco.percent, 2)
-    except:
-        disk_free = 0
-
+def coletar_dados():
     return {
+        "agent_id": AGENT_ID,
         "cliente": CLIENTE,
         "agent_name": AGENT_NAME,
-        "hostname": HOSTNAME,
-        "ip_local": get_ip_local(),
-        "cpu_percent": cpu,
-        "ram_percent": ram,
-        "disk_free_percent": disk_free,
-        "timestamp": datetime.now(UTC).isoformat()
+        "hostname": platform.node(),
+        "ip_local": get_ip(),
+        "cpu_percent": psutil.cpu_percent(interval=1),
+        "ram_percent": psutil.virtual_memory().percent,
+        "disk_free_percent": psutil.disk_usage("/").free / psutil.disk_usage("/").total * 100,
+        "email_alerta": EMAIL,
+        "timestamp": datetime.utcnow().isoformat()
     }
 
-# ===============================
-# CACHE OFFLINE
-# ===============================
-def salvar_cache(dados):
-    cache = []
+# =========================
+# Loop principal
+# =========================
+print("===================================")
+print(" Monitoramento TI - Agent Iniciado ")
+print("===================================")
+print(f"Cliente  : {CLIENTE}")
+print(f"Servidor : {AGENT_NAME}")
+print(f"Agent ID : {AGENT_ID}")
+print(f"Endpoint : {API_URL}")
+print("===================================")
 
-    if os.path.exists(CACHE_FILE):
-        try:
-            with open(CACHE_FILE, "r", encoding="utf-8") as f:
-                cache = json.load(f)
-        except:
-            cache = []
+while True:
+    try:
+        payload = coletar_dados()
+        r = requests.post(API_URL, json=payload, timeout=10)
 
-    cache.append(dados)
+        if r.status_code == 200:
+            print(f"[OK] Heartbeat enviado - {datetime.now().strftime('%H:%M:%S')}")
+        else:
+            print(f"[ERRO] HTTP {r.status_code}")
 
-    with open(CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(cache, f, indent=2)
+    except Exception as e:
+        print(f"[FALHA] {e}")
 
-def enviar_cache():
-    if not os.path.exists(CACHE_FILE):
-        return
-
-    with open(CACHE_FILE, "r", encoding="utf-8") as f:
-        cache = json.load(f)
-
-    if not cache:
-        return
-
-    log(f"📤 Enviando cache offline ({len(cache)})")
-
-    enviados = 0
-    for item in cache:
-        try:
-            r = requests.post(API_URL, json=item, timeout=5)
-            if r.status_code == 200:
-                enviados += 1
-            else:
-                break
-        except:
-            break
-
-    if enviados == len(cache):
-        os.remove(CACHE_FILE)
-        log("🧹 Cache offline limpo")
-
-# ===============================
-# LOOP PRINCIPAL
-# ===============================
-def main():
-    log("🚀 Monitor Agent iniciado")
-    log(f"🏢 Cliente: {CLIENTE}")
-    log(f"🖥️ Hostname: {HOSTNAME}")
-    log(f"⏱️ Intervalo: {INTERVAL}s")
-    log(f"🌐 API: {API_URL}")
-
-    while True:
-        try:
-            dados = coletar_status()
-
-            try:
-                r = requests.post(API_URL, json=dados, timeout=5)
-
-                if r.status_code == 200:
-                    log("✅ Heartbeat enviado")
-                    enviar_cache()
-                else:
-                    log(f"⚠️ API {r.status_code} — salvando cache")
-                    salvar_cache(dados)
-
-            except:
-                log("❌ API indisponível — salvando cache")
-                salvar_cache(dados)
-
-        except Exception as e:
-            log(f"❌ Erro interno: {e}")
-
-        time.sleep(INTERVAL)
-
-# ===============================
-# ENTRYPOINT
-# ===============================
-if __name__ == "__main__":
-    main()
+    time.sleep(INTERVAL)
