@@ -19,7 +19,7 @@ AGENT_ID_PATH = os.path.join(BASE_DIR, "agent_id.txt")
 # Carrega config
 # =========================
 if not os.path.exists(CONFIG_PATH):
-    print(f"[ERRO] config.json não encontrado")
+    print(f"[ERRO] config.json não encontrado em {CONFIG_PATH}")
     exit(1)
 
 try:
@@ -32,8 +32,8 @@ except Exception as e:
 API_URL = config.get("api_url")
 CLIENTE = config.get("cliente")
 AGENT_NAME = config.get("agent_name", "SERVIDOR")
-# Forçamos o intervalo para 15 segundos para agilizar
-INTERVAL = 15 
+# Agora ele lê os 10 segundos do seu JSON, ou usa 15 se não encontrar
+INTERVAL = int(config.get("interval_seconds", 15)) 
 
 # =========================
 # Gera / carrega ID único
@@ -59,6 +59,7 @@ def coletar_dados():
     cpu = psutil.cpu_percent(interval=1)
     ram = psutil.virtual_memory().percent
     try:
+        # Tenta pegar o disco C: no Windows
         uso_disco = psutil.disk_usage('C:\\' if platform.system() == 'Windows' else '/')
         disco_livre_pct = (uso_disco.free / uso_disco.total) * 100
     except: disco_livre_pct = 0
@@ -75,14 +76,21 @@ def coletar_dados():
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
-print(f"Monitorando: {CLIENTE} (Envio a cada {INTERVAL}s)")
+print("===================================")
+print(" Monitoramento TI - Agent Ativo    ")
+print(f" Monitorando: {CLIENTE}            ")
+print(f" Intervalo  : {INTERVAL}s          ")
+print("===================================")
 
 while True:
     try:
         payload = coletar_dados()
         r = requests.post(API_URL, json=payload, timeout=10)
         if r.status_code == 200:
-            print(f"[OK] Enviado - {datetime.now().strftime('%H:%M:%S')}")
+            print(f"[OK] Heartbeat enviado - {datetime.now().strftime('%H:%M:%S')}")
+        else:
+            print(f"[ERRO] HTTP {r.status_code}")
     except Exception as e:
         print(f"[FALHA] {e}")
+    
     time.sleep(INTERVAL)
