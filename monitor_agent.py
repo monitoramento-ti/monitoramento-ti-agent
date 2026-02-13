@@ -6,8 +6,11 @@ import socket
 import platform
 import requests
 import psutil
-from datetime import datetime, timezone  # Importação correta para compatibilidade
+from datetime import datetime, timezone
 
+# =========================
+# Configurações de Caminho
+# =========================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 AGENT_ID_PATH = os.path.join(BASE_DIR, "agent_id.txt")
@@ -16,11 +19,16 @@ AGENT_ID_PATH = os.path.join(BASE_DIR, "agent_id.txt")
 # Carrega config
 # =========================
 if not os.path.exists(CONFIG_PATH):
-    print("[ERRO] config.json não encontrado")
+    print(f"[ERRO] config.json não encontrado em: {CONFIG_PATH}")
     exit(1)
 
-with open(config_path, 'r', encoding='latin-1') as f:
-    config = json.load(f)
+# Corrigido: usando CONFIG_PATH (maiúsculo) e encoding latin-1 para acentos
+try:
+    with open(CONFIG_PATH, 'r', encoding='latin-1') as f:
+        config = json.load(f)
+except Exception as e:
+    print(f"[ERRO] Falha ao ler config.json: {e}")
+    exit(1)
 
 API_URL = config.get("api_url")
 CLIENTE = config.get("cliente")
@@ -29,7 +37,7 @@ INTERVAL = int(config.get("interval_seconds", 60))
 EMAIL = config.get("email_alerta")
 
 if not API_URL or not CLIENTE:
-    print("[ERRO] config.json incompleto")
+    print("[ERRO] config.json incompleto (api_url ou cliente faltando)")
     exit(1)
 
 # =========================
@@ -78,7 +86,7 @@ def coletar_dados():
         "ram_percent": ram,
         "disk_free_percent": disco_livre_pct,
         "email_alerta": EMAIL,
-        "timestamp": datetime.now(timezone.utc).isoformat() # Mudança aqui para evitar erro de versão
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 # =========================
@@ -108,5 +116,3 @@ while True:
         print(f"[FALHA] {e}")
 
     time.sleep(INTERVAL)
-
-
