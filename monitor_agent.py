@@ -19,7 +19,7 @@ if not os.path.exists(CONFIG_PATH):
     print("[ERRO] config.json não encontrado")
     exit(1)
 
-with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+with open(config_path, 'r', encoding='latin-1') as f:
     config = json.load(f)
 
 API_URL = config.get("api_url")
@@ -108,3 +108,4 @@ while True:
         print(f"[FALHA] {e}")
 
     time.sleep(INTERVAL)
+
