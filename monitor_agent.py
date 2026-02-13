@@ -19,10 +19,9 @@ AGENT_ID_PATH = os.path.join(BASE_DIR, "agent_id.txt")
 # Carrega config
 # =========================
 if not os.path.exists(CONFIG_PATH):
-    print(f"[ERRO] config.json não encontrado em: {CONFIG_PATH}")
+    print(f"[ERRO] config.json não encontrado")
     exit(1)
 
-# Corrigido: usando CONFIG_PATH (maiúsculo) e encoding latin-1 para acentos
 try:
     with open(CONFIG_PATH, 'r', encoding='latin-1') as f:
         config = json.load(f)
@@ -33,12 +32,8 @@ except Exception as e:
 API_URL = config.get("api_url")
 CLIENTE = config.get("cliente")
 AGENT_NAME = config.get("agent_name", "SERVIDOR")
-INTERVAL = int(config.get("interval_seconds", 60))
-EMAIL = config.get("email_alerta")
-
-if not API_URL or not CLIENTE:
-    print("[ERRO] config.json incompleto (api_url ou cliente faltando)")
-    exit(1)
+# Forçamos o intervalo para 15 segundos para agilizar
+INTERVAL = 15 
 
 # =========================
 # Gera / carrega ID único
@@ -51,9 +46,6 @@ else:
     with open(AGENT_ID_PATH, "w") as f:
         f.write(AGENT_ID)
 
-# =========================
-# Funções
-# =========================
 def get_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -61,20 +53,15 @@ def get_ip():
         ip = s.getsockname()[0]
         s.close()
         return ip
-    except:
-        return "0.0.0.0"
+    except: return "0.0.0.0"
 
 def coletar_dados():
-    # Coleta de métricas
     cpu = psutil.cpu_percent(interval=1)
     ram = psutil.virtual_memory().percent
-    
     try:
-        # Tenta pegar o disco principal (C: no Windows)
         uso_disco = psutil.disk_usage('C:\\' if platform.system() == 'Windows' else '/')
         disco_livre_pct = (uso_disco.free / uso_disco.total) * 100
-    except:
-        disco_livre_pct = 0
+    except: disco_livre_pct = 0
 
     return {
         "agent_id": AGENT_ID,
@@ -85,34 +72,17 @@ def coletar_dados():
         "cpu_percent": cpu,
         "ram_percent": ram,
         "disk_free_percent": disco_livre_pct,
-        "email_alerta": EMAIL,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
-# =========================
-# Loop principal
-# =========================
-print("===================================")
-print(" Monitoramento TI - Agent Iniciado ")
-print("===================================")
-print(f"Cliente  : {CLIENTE}")
-print(f"Servidor : {AGENT_NAME}")
-print(f"Agent ID : {AGENT_ID}")
-print(f"Endpoint : {API_URL}")
-print("===================================")
+print(f"Monitorando: {CLIENTE} (Envio a cada {INTERVAL}s)")
 
 while True:
     try:
         payload = coletar_dados()
-        # Envia os dados para a API
-        r = requests.post(API_URL, json=payload, timeout=15)
-
+        r = requests.post(API_URL, json=payload, timeout=10)
         if r.status_code == 200:
-            print(f"[OK] Heartbeat enviado - {datetime.now().strftime('%H:%M:%S')}")
-        else:
-            print(f"[ERRO] HTTP {r.status_code}")
-
+            print(f"[OK] Enviado - {datetime.now().strftime('%H:%M:%S')}")
     except Exception as e:
         print(f"[FALHA] {e}")
-
     time.sleep(INTERVAL)
