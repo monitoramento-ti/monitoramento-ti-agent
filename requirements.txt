@@ -6,3 +6,4 @@ pydantic
 requests
 psutil
 psycopg2-binary
+psycopg2
