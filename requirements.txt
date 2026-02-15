@@ -5,7 +5,8 @@ sqlalchemy
 pydantic
 requests
 psutil
-psycopg2-binary==2.9.9
+psycopg2
 sqlalchemy
+
 
 
