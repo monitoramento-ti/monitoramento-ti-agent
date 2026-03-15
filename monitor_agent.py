@@ -11,8 +11,7 @@ from datetime import datetime, timezone
 # ==========================================
 # CONFIGURAÇÃO DE VERSÃO E ATUALIZAÇÃO
 # ==========================================
-VERSAO_ATUAL = "1.0.1"  # Toda vez que mudar o código no GitHub, aumente este número!
-# URL do arquivo "raw" (puro texto) no seu GitHub Público
+VERSAO_ATUAL = "1.0.2"  # Aumentei para 1.0.2 para disparar o update
 URL_GITHUB_RAW = "https://raw.githubusercontent.com/monitoramento-ti/monitoramento-ti-agent/main/monitor_agent.py"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -31,7 +30,7 @@ except Exception as e:
 API_URL = config.get("api_url")
 CLIENTE = config.get("cliente")
 AGENT_NAME = config.get("agent_name")
-INTERVAL = 5 # Envio a cada 5 segundos para resposta rápida
+INTERVAL = 5 
 
 # Garante o ID único do computador
 if os.path.exists(AGENT_ID_PATH):
@@ -48,7 +47,7 @@ def self_update():
         
         if response.status_code == 200:
             novo_codigo = response.text
-            # Se a string da VERSAO_ATUAL no GitHub for diferente da minha, eu atualizo
+            # Se a versão no GitHub for diferente da atual, atualiza
             if f'VERSAO_ATUAL = "{VERSAO_ATUAL}"' not in novo_codigo:
                 print(">>> NOVA VERSÃO DETECTADA! Baixando atualização... <<<")
                 
@@ -58,7 +57,6 @@ def self_update():
                 
                 print("Atualização concluída. Reiniciando agente...")
                 time.sleep(2)
-                # Comando para o Python se auto-reiniciar
                 os.execv(sys.executable, ['python'] + sys.argv)
             else:
                 print("Agente já está na versão mais recente.")
@@ -72,8 +70,15 @@ def coletar_dados():
         cpu = psutil.cpu_percent(interval=1)
         ram = psutil.virtual_memory().percent
         ip = socket.gethostbyname(socket.gethostname())
+        
+        # --- NOVA PARTE: COLETA DE DISCO ---
+        disco = psutil.disk_usage('C:\\' if os.name == 'nt' else '/')
+        disk_p = disco.percent
+        disk_f = round(disco.free / (1024**3), 1) # GB livres
+        # ----------------------------------
+        
     except:
-        cpu, ram, ip = 0, 0, "0.0.0.0"
+        cpu, ram, ip, disk_p, disk_f = 0, 0, "0.0.0.0", 0, 0
 
     return {
         "agent_id": AGENT_ID,
@@ -82,28 +87,28 @@ def coletar_dados():
         "ip_local": ip,
         "cpu_percent": cpu,
         "ram_percent": ram,
+        "disk_percent": disk_p, # NOVO
+        "disk_free": disk_f,    # NOVO
         "versao": VERSAO_ATUAL,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 print(f"--- MONITOR TI AGENT v{VERSAO_ATUAL} ---")
-print(f"Monitorando: {CLIENTE} -> {API_URL}")
+print(f"Monitorando: {CLIENTE}")
 
 contador_check_update = 0
 
 while True:
-    # 1. Enviar Heartbeat para o Render
     try:
         payload = coletar_dados()
         r = requests.post(API_URL, json=payload, timeout=5)
         if r.status_code == 200:
-            print(f"[OK] Heartbeat enviado v{VERSAO_ATUAL}")
+            print(f"[OK] Heartbeat v{VERSAO_ATUAL} | CPU: {payload['cpu_percent']}% | HD: {payload['disk_percent']}%")
         else:
             print(f"[AVISO] Erro no servidor: {r.status_code}")
     except Exception as e:
         print(f"[FALHA] Servidor inacessível: {e}")
 
-    # 2. Checar atualização a cada 100 envios (aprox. a cada 8-10 minutos)
     contador_check_update += 1
     if contador_check_update >= 100:
         self_update()
