@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 # ==========================================
 # CONFIGURAÇÃO DE VERSÃO E ATUALIZAÇÃO
 # ==========================================
-VERSAO_ATUAL = "1.0.3"
+VERSAO_ATUAL = "1.0.4"
 URL_GITHUB_RAW = "https://raw.githubusercontent.com/monitoramento-ti/monitoramento-ti-agent/main/monitor_agent.py"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -32,7 +32,18 @@ except Exception as e:
 API_URL = config.get("api_url")
 CLIENTE = config.get("cliente")
 AGENT_NAME = config.get("agent_name")
-INTERVAL = 5
+
+# Migração automática: atualiza do Render para Railway
+NOVA_URL = "https://monitoramento-ti-production.up.railway.app/heartbeat"
+if API_URL and "onrender.com" in API_URL:
+    print(">>> Migrando URL do Render para Railway automaticamente...")
+    config["api_url"] = NOVA_URL
+    with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+    API_URL = NOVA_URL
+    print(f">>> URL atualizada para: {API_URL}")
+
+INTERVAL = 15  # 15s reduz carga no servidor mantendo deteccao de queda em ~30s
 
 # Garante o ID único do computador
 if os.path.exists(AGENT_ID_PATH):
@@ -147,7 +158,7 @@ while True:
     try:
         # Mede backbone a cada 30s (6 ciclos de 5s)
         contador_provider_ping += 1
-        if contador_provider_ping >= 6 or not latencias_providers:
+        if contador_provider_ping >= 2 or not latencias_providers:
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Medindo backbone...")
             latencias_providers = medir_latencias_provedores()
             contador_provider_ping = 0
