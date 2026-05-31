@@ -1,13 +1,3 @@
-fastapi
-uvicorn
-jinja2
-sqlalchemy
-pydantic
 requests
 psutil
-psycopg2-binary
-resend
-pandas
-xlsxwriter
-matplotlib
-reportlab
+cryptography
