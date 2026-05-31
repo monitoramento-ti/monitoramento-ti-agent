@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 # ==========================================
 # CONFIGURAÇÃO DE VERSÃO E ATUALIZAÇÃO
 # ==========================================
-VERSAO_ATUAL = "1.0.4"
+VERSAO_ATUAL = "1.0.5"
 URL_GITHUB_RAW = "https://raw.githubusercontent.com/monitoramento-ti/monitoramento-ti-agent/main/monitor_agent.py"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -35,6 +35,7 @@ AGENT_NAME = config.get("agent_name")
 
 # Migração automática: atualiza do Render para Railway
 NOVA_URL = "https://monitoramento-ti-production.up.railway.app/heartbeat"
+HEARTBEAT_TOKEN = "451d2982863105670a02cc82d8e03be71d3c12ffac2a456414aef294d11085ba"
 if API_URL and "onrender.com" in API_URL:
     print(">>> Migrando URL do Render para Railway automaticamente...")
     config["api_url"] = NOVA_URL
@@ -141,7 +142,8 @@ def coletar_dados() -> dict:
         "disk_percent": disk_p,
         "disk_free": disk_f,
         "versao": VERSAO_ATUAL,
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "token": HEARTBEAT_TOKEN
     }
 
 # ==========================================
