@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 # ==========================================
 # CONFIGURAÇÃO DE VERSÃO E ATUALIZAÇÃO
 # ==========================================
-VERSAO_ATUAL = "1.0.5"
+VERSAO_ATUAL = "1.0.6"
 URL_GITHUB_RAW = "https://raw.githubusercontent.com/monitoramento-ti/monitoramento-ti-agent/main/monitor_agent.py"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -98,26 +98,84 @@ def medir_latencias_provedores() -> dict:
         print(f"  [{status}] {ip}")
     return resultados
 
+# Chave pública RSA para verificação de assinatura
+CHAVE_PUBLICA_PEM = b"""-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArJbH3tzaa1HaeFKW6NYw
+FJEZ/6SNpdC0w9muAPKeIYN5Z3qp5zftbEw6Y96NvwR1FovOVqI6WPwMXfCMHl2r
+JGERBDHn9rozNehRj3/SM/I3Y5V1U3q1ufp5nbTnjr1fB6o1tnRvf/Fy7ayn+6n3
+ZfrHtUNhM4rXsVLDl3TC4TW7sxLvskBqY5+wzWs4IvPLBA4JnDxFgz3tSD9jmxVC
+EpbWU/LW7MK0+ehWJWlTMjhVKRLUmo6xKWnmecTL9EJAw04HHchUXvLqgkFidRdC
+Z0oPlEsH4MEEdoMpiAK27IySa4ju8m0yUQMQ2i0BEhNANvGboznwh/aQ3KjB5lLQ
+DwIDAQAB
+-----END PUBLIC KEY-----"""
+
+URL_GITHUB_SIG = "https://raw.githubusercontent.com/monitoramento-ti/monitoramento-ti-agent/main/monitor_agent.sig"
+
+def verificar_assinatura(codigo_bytes: bytes, assinatura_bytes: bytes) -> bool:
+    """Verifica se o código foi assinado pela chave privada da Yalla."""
+    try:
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+        from cryptography.exceptions import InvalidSignature
+
+        chave_publica = serialization.load_pem_public_key(CHAVE_PUBLICA_PEM)
+        chave_publica.verify(
+            assinatura_bytes,
+            codigo_bytes,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        return True
+    except InvalidSignature:
+        return False
+    except Exception as e:
+        print(f"Erro ao verificar assinatura: {e}")
+        return False
+
 def self_update():
-    """Verifica se há uma nova versão no GitHub e se auto-atualiza."""
+    """Verifica se há uma nova versão no GitHub, valida assinatura e auto-atualiza."""
     try:
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Checando atualizações no GitHub...")
         response = requests.get(URL_GITHUB_RAW, timeout=15)
 
-        if response.status_code == 200:
-            novo_codigo = response.text
-            if f'VERSAO_ATUAL = "{VERSAO_ATUAL}"' not in novo_codigo:
-                print(">>> NOVA VERSÃO DETECTADA! Baixando atualização... <<<")
-                caminho_arquivo = os.path.abspath(__file__)
-                with open(caminho_arquivo, 'w', encoding='utf-8') as f:
-                    f.write(novo_codigo)
-                print("Atualização concluída. Reiniciando agente...")
-                time.sleep(2)
-                os.execv(sys.executable, ['python'] + sys.argv)
-            else:
-                print("Agente já está na versão mais recente.")
-        else:
+        if response.status_code != 200:
             print(f"Falha ao checar update. Status: {response.status_code}")
+            return
+
+        novo_codigo = response.text
+
+        if f'VERSAO_ATUAL = "{VERSAO_ATUAL}"' in novo_codigo:
+            print("Agente já está na versão mais recente.")
+            return
+
+        print(">>> NOVA VERSÃO DETECTADA! Verificando assinatura... <<<")
+
+        # Baixa a assinatura
+        sig_response = requests.get(URL_GITHUB_SIG, timeout=15)
+        if sig_response.status_code != 200:
+            print("❌ ATUALIZAÇÃO REJEITADA: arquivo de assinatura não encontrado!")
+            return
+
+        # Verifica assinatura
+        codigo_bytes = novo_codigo.encode('utf-8')
+        assinatura_bytes = sig_response.content
+
+        if not verificar_assinatura(codigo_bytes, assinatura_bytes):
+            print("❌ ATUALIZAÇÃO REJEITADA: assinatura inválida! Possível código malicioso.")
+            return
+
+        print("✅ Assinatura válida! Instalando atualização...")
+        caminho_arquivo = os.path.abspath(__file__)
+        with open(caminho_arquivo, 'w', encoding='utf-8') as f:
+            f.write(novo_codigo)
+
+        print("Atualização concluída. Reiniciando agente...")
+        time.sleep(2)
+        os.execv(sys.executable, ['python'] + sys.argv)
+
     except Exception as e:
         print(f"Erro durante o auto-update: {e}")
 
