@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 # ==========================================
 # CONFIGURAÇÃO DE VERSÃO E ATUALIZAÇÃO
 # ==========================================
-VERSAO_ATUAL = "1.0.6"
+VERSAO_ATUAL = "1.0.7"
 URL_GITHUB_RAW = "https://raw.githubusercontent.com/monitoramento-ti/monitoramento-ti-agent/main/monitor_agent.py"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -207,24 +207,39 @@ def coletar_dados() -> dict:
 # ==========================================
 # LOOP PRINCIPAL
 # ==========================================
+import threading
+
 print(f"--- MONITOR TI AGENT v{VERSAO_ATUAL} ---")
 print(f"Monitorando: {CLIENTE}")
 
+# Cache de latências — atualizado em thread separada
+latencias_providers = {}
+latencias_lock = threading.Lock()
+
+def thread_backbone():
+    """Thread independente que mede backbone a cada 30s sem bloquear o heartbeat."""
+    global latencias_providers
+    while True:
+        try:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Medindo backbone...")
+            resultado = medir_latencias_provedores()
+            with latencias_lock:
+                latencias_providers = resultado
+        except Exception as e:
+            print(f"[BACKBONE] Erro: {e}")
+        time.sleep(30)
+
+# Inicia thread do backbone em background
+t = threading.Thread(target=thread_backbone, daemon=True)
+t.start()
+
 contador_check_update = 0
-contador_provider_ping = 0  # mede providers a cada 6 ciclos (30s)
-latencias_providers = {}    # cache das últimas latências medidas
 
 while True:
     try:
-        # Mede backbone a cada 30s (6 ciclos de 5s)
-        contador_provider_ping += 1
-        if contador_provider_ping >= 2 or not latencias_providers:
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] Medindo backbone...")
-            latencias_providers = medir_latencias_provedores()
-            contador_provider_ping = 0
-
         payload = coletar_dados()
-        payload["provider_latencies"] = latencias_providers
+        with latencias_lock:
+            payload["provider_latencies"] = dict(latencias_providers)
 
         r = requests.post(API_URL, json=payload, timeout=5)
         if r.status_code == 200:
