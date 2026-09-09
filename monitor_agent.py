@@ -8,12 +8,13 @@ import psutil
 import sys
 import subprocess
 import re
+import threading
 from datetime import datetime, timezone
 
 # ==========================================
 # CONFIGURAÇÃO DE VERSÃO E ATUALIZAÇÃO
 # ==========================================
-VERSAO_ATUAL = "1.0.7"
+VERSAO_ATUAL = "1.0.8"
 URL_GITHUB_RAW = "https://raw.githubusercontent.com/monitoramento-ti/monitoramento-ti-agent/main/monitor_agent.py"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -205,23 +206,26 @@ def coletar_dados() -> dict:
     }
 
 # ==========================================
-# LOOP PRINCIPAL
+# LOOP PRINCIPAL — WebSocket Persistente
 # ==========================================
-import threading
+import websocket
+import json as json_lib
 
 print(f"--- MONITOR TI AGENT v{VERSAO_ATUAL} ---")
 print(f"Monitorando: {CLIENTE}")
+
+# URL WebSocket derivada da API_URL
+WS_URL = API_URL.replace("https://", "wss://").replace("http://", "ws://").replace("/heartbeat", "/ws/agent")
 
 # Cache de latências — atualizado em thread separada
 latencias_providers = {}
 latencias_lock = threading.Lock()
 
 def thread_backbone():
-    """Thread independente que mede backbone a cada 30s sem bloquear o heartbeat."""
+    """Thread independente que mede backbone a cada 30s."""
     global latencias_providers
     while True:
         try:
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] Medindo backbone...")
             resultado = medir_latencias_provedores()
             with latencias_lock:
                 latencias_providers = resultado
@@ -229,29 +233,91 @@ def thread_backbone():
             print(f"[BACKBONE] Erro: {e}")
         time.sleep(30)
 
-# Inicia thread do backbone em background
-t = threading.Thread(target=thread_backbone, daemon=True)
-t.start()
+# Inicia thread do backbone
+threading.Thread(target=thread_backbone, daemon=True).start()
 
 contador_check_update = 0
 
+def conectar_websocket():
+    """Conecta ao servidor via WebSocket e envia métricas continuamente."""
+    global contador_check_update
+
+    try:
+        print(f"[WS] Conectando em: {WS_URL}")
+        ws = websocket.create_connection(WS_URL, timeout=10)
+
+        # Autenticação
+        auth = json_lib.dumps({
+            "token": HEARTBEAT_TOKEN,
+            "agent_id": AGENT_ID
+        })
+        ws.send(auth)
+        resp = json_lib.loads(ws.recv())
+        if resp.get("status") != "ok":
+            print(f"[WS] Autenticação falhou: {resp}")
+            ws.close()
+            return
+
+        print(f"[WS] Conectado e autenticado!")
+        ws.settimeout(20)
+
+        while True:
+            try:
+                # Envia métricas a cada 15s
+                payload = coletar_dados()
+                with latencias_lock:
+                    payload["provider_latencies"] = dict(latencias_providers)
+                payload["tipo"] = "metricas"
+
+                ws.send(json_lib.dumps(payload))
+                print(f"[OK] v{VERSAO_ATUAL} | CPU: {payload['cpu_percent']}% | HD: {payload['disk_percent']}%")
+
+                # Aguarda 15s — verifica ping do servidor enquanto espera
+                for _ in range(3):
+                    time.sleep(5)
+                    try:
+                        ws.settimeout(1)
+                        msg = ws.recv()
+                        data = json_lib.loads(msg)
+                        if data.get("tipo") == "ping":
+                            ws.send(json_lib.dumps({"tipo": "pong"}))
+                    except websocket.WebSocketTimeoutException:
+                        pass
+                    finally:
+                        ws.settimeout(20)
+
+                contador_check_update += 1
+                if contador_check_update >= 20:  # ~5 minutos
+                    self_update()
+                    contador_check_update = 0
+
+            except (websocket.WebSocketConnectionClosedException,
+                    websocket.WebSocketTimeoutException,
+                    ConnectionResetError, BrokenPipeError, OSError) as e:
+                print(f"[WS] Conexão perdida: {e}")
+                try: ws.close()
+                except: pass
+                return
+
+    except Exception as e:
+        print(f"[WS] Erro ao conectar: {e}")
+
+# Loop principal com reconexão automática e fallback HTTP
 while True:
+    try:
+        conectar_websocket()
+    except Exception as e:
+        print(f"[WS] Erro inesperado: {e}")
+
+    # Fallback HTTP enquanto tenta reconectar
+    print(f"[WS] Reconectando em 10s... (usando HTTP como fallback)")
     try:
         payload = coletar_dados()
         with latencias_lock:
             payload["provider_latencies"] = dict(latencias_providers)
-
-        r = requests.post(API_URL, json=payload, timeout=5)
-        if r.status_code == 200:
-            print(f"[OK] v{VERSAO_ATUAL} | CPU: {payload['cpu_percent']}% | HD: {payload['disk_percent']}%")
-        else:
-            print(f"[AVISO] Erro no servidor: {r.status_code}")
+        requests.post(API_URL, json=payload, timeout=5)
+        print(f"[HTTP] Fallback enviado")
     except Exception as e:
-        print(f"[FALHA] Servidor inacessível: {e}")
+        print(f"[HTTP] Fallback falhou: {e}")
 
-    contador_check_update += 1
-    if contador_check_update >= 100:
-        self_update()
-        contador_check_update = 0
-
-    time.sleep(INTERVAL)
+    time.sleep(10)
