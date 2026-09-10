@@ -3,10 +3,19 @@ import json
 import time
 import uuid
 import socket
+import subprocess
+import sys
+
+# Auto-instala websocket-client se necessário
+try:
+    import websocket
+except ImportError:
+    print("Instalando websocket-client...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "websocket-client", "--quiet"])
+    import websocket
+
 import requests
 import psutil
-import sys
-import subprocess
 import re
 import threading
 from datetime import datetime, timezone
