@@ -121,9 +121,27 @@ DwIDAQAB
 
 URL_GITHUB_SIG = "https://raw.githubusercontent.com/monitoramento-ti/monitoramento-ti-agent/main/monitor_agent.sig"
 
+def verificar_assinatura(codigo_bytes: bytes, assinatura_bytes: bytes) -> bool:
+    """Verifica se o código foi assinado pela chave privada da Yalla."""
+    try:
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+        from cryptography.exceptions import InvalidSignature
+        chave_publica = serialization.load_pem_public_key(CHAVE_PUBLICA_PEM)
+        chave_publica.verify(
+            assinatura_bytes, codigo_bytes,
+            padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+            hashes.SHA256()
+        )
+        return True
+    except InvalidSignature:
+        return False
+    except Exception as e:
+        print(f"Erro ao verificar assinatura: {e}")
+        return False
+
 def self_update():
-    """Verifica se há nova versão no GitHub e auto-atualiza SEM verificar assinatura.
-    Versão de transição para garantir atualização de agentes antigos."""
+    """Verifica se há nova versão no GitHub, valida assinatura e auto-atualiza."""
     try:
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Checando atualizações no GitHub...")
         response = requests.get(URL_GITHUB_RAW, timeout=15)
@@ -138,7 +156,18 @@ def self_update():
             print("Agente já está na versão mais recente.")
             return
 
-        print(">>> NOVA VERSÃO DETECTADA! Instalando atualização... <<<")
+        print(">>> NOVA VERSÃO DETECTADA! Verificando assinatura... <<<")
+
+        sig_response = requests.get(URL_GITHUB_SIG, timeout=15)
+        if sig_response.status_code != 200:
+            print("❌ ATUALIZAÇÃO REJEITADA: assinatura não encontrada!")
+            return
+
+        if not verificar_assinatura(novo_codigo.encode('utf-8'), sig_response.content):
+            print("❌ ATUALIZAÇÃO REJEITADA: assinatura inválida!")
+            return
+
+        print("✅ Assinatura válida! Instalando atualização...")
         caminho_arquivo = os.path.abspath(__file__)
         with open(caminho_arquivo, 'w', encoding='utf-8') as f:
             f.write(novo_codigo)
